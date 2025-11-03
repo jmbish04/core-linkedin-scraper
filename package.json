@@ -4,7 +4,9 @@
   "description": "advanced node.js package for getting job listings from LinkedIn",
   "main": "index.js",
   "scripts": {
-    "test": "node test.js"
+    "test": "node test.js",
+    "start": "node index.js",
+    "search": "node index.js"
   },
   "repository": {
     "type": "git",

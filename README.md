@@ -41,23 +41,43 @@ Basic Example:
 ```
 const linkedIn = require('linkedin-jobs-api');
 
-const queryOptions = {
-  keyword: 'software engineer',
-  location: 'India',
-  dateSincePosted: 'past Week',
+// Example: Search for Product Management, Legal Operations, or
+// Business Intelligence roles in San Francisco, Remote, or Hybrid
+// Tip: Run multiple queries to cover multiple keywords/locations
+const queries = [
+  { keyword: 'product management', location: 'San Francisco', remoteFilter: 'on site' },
+  { keyword: 'product management', location: 'San Francisco', remoteFilter: 'hybrid' },
+  { keyword: 'product management', location: 'San Francisco', remoteFilter: 'remote' },
+  { keyword: 'legal operations', location: 'San Francisco', remoteFilter: 'on site' },
+  { keyword: 'legal operations', location: 'San Francisco', remoteFilter: 'hybrid' },
+  { keyword: 'legal operations', location: 'San Francisco', remoteFilter: 'remote' },
+  { keyword: 'business intelligence', location: 'San Francisco', remoteFilter: 'on site' },
+  { keyword: 'business intelligence', location: 'San Francisco', remoteFilter: 'hybrid' },
+  { keyword: 'business intelligence', location: 'San Francisco', remoteFilter: 'remote' },
+  // Remote-only across US (omit location for broader reach or specify a country)
+  { keyword: 'product management', location: 'United States', remoteFilter: 'remote' },
+  { keyword: 'legal operations', location: 'United States', remoteFilter: 'remote' },
+  { keyword: 'business intelligence', location: 'United States', remoteFilter: 'remote' },
+].map(q => ({
+  dateSincePosted: 'past week',
   jobType: 'full time',
-  remoteFilter: 'remote',
-  salary: '100000',
-  experienceLevel: 'entry level',
-  limit: '10',
-  page: "0",
+  sortBy: 'recent',
+  limit: '25',
+  page: '0',
   has_verification: false,
   under_10_applicants: false,
-};
+  ...q,
+}));
 
-linkedIn.query(queryOptions).then(response => {
-	console.log(response); // An array of Job objects
-});
+// Run queries sequentially and merge results
+(async () => {
+  const all = [];
+  for (const opts of queries) {
+    const res = await linkedIn.query(opts);
+    all.push(...res);
+  }
+  console.log(all);
+})();
 ```
 
 ## Query Object Parameters

@@ -1,9 +1,17 @@
 const cheerio = require("cheerio");
 const axios = require("axios");
 const randomUseragent = require("random-useragent");
+const fs = require("fs");
+const path = require("path");
 
 // Utility functions
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Default roles to search (always the same)
+const DEFAULT_ROLES = ["Data Engineer", "AI PM", "Legal Program Manager"];
+
+// Hardcoded locations as per Python scraper
+const DEFAULT_LOCATIONS = ["San Francisco Bay Area", "Remote"];
 
 // Cache implementation
 class JobCache {
@@ -41,17 +49,6 @@ class JobCache {
 
 const cache = new JobCache();
 
-// Generate a unique cache key based on the query parameters
-Query.prototype.getCacheKey = function () {
-  return `${this.url(0)}_limit:${this.limit}`;
-};
-
-// Main query function
-module.exports.query = (queryObject) => {
-  const query = new Query(queryObject);
-  return query.getJobs();
-};
-
 // Query constructor
 function Query(queryObj) {
   this.host = queryObj.host || "www.linkedin.com";
@@ -67,6 +64,7 @@ function Query(queryObj) {
   this.page = Number(queryObj.page) || 0;
   this.has_verification = queryObj.has_verification || false;
   this.under_10_applicants = queryObj.under_10_applicants || false;
+  this.savePayloads = queryObj.savePayloads || false; // Default: don't save payloads
 }
 
 // Query prototype methods
@@ -138,6 +136,11 @@ Query.prototype.getPage = function () {
   return this.page * 25;
 };
 
+// Generate a unique cache key based on the query parameters
+Query.prototype.getCacheKey = function () {
+  return `${this.url(0)}_limit:${this.limit}`;
+};
+
 Query.prototype.url = function (start) {
   let query = `https://${this.host}/jobs-guest/jobs/api/seeMoreJobPostings/search?`;
 
@@ -163,6 +166,12 @@ Query.prototype.url = function (start) {
   else if (this.sortBy === "relevant") params.append("sortBy", "R");
 
   return query + params.toString();
+};
+
+// Main query function
+module.exports.query = (queryObject) => {
+  const query = new Query(queryObject);
+  return query.getJobs();
 };
 
 Query.prototype.getJobs = async function () {
@@ -260,6 +269,22 @@ Query.prototype.fetchJobBatch = async function (start) {
       timeout: 10000,
     });
 
+    // Save the raw payload before parsing (only if savePayloads is enabled)
+    if (this.savePayloads) {
+      const batchNumber = Math.floor(start / 25) + 1;
+      const payloadString = typeof response.data === 'string' 
+        ? response.data 
+        : JSON.stringify(response.data, null, 2);
+      
+      savePayload(
+        payloadString,
+        this.keyword,
+        this.location,
+        start,
+        batchNumber
+      );
+    }
+
     return parseJobList(response.data);
   } catch (error) {
     if (error.response?.status === 429) {
@@ -288,7 +313,13 @@ function parseJobList(jobData) {
             .text()
             .trim()
             .replace(/\s+/g, " ");
+          // Extract job URL from the full-link anchor
           const jobUrl = job.find(".base-card__full-link").attr("href");
+          
+          // Ensure full URL if it's a relative path
+          const fullJobUrl = jobUrl 
+            ? (jobUrl.startsWith('http') ? jobUrl : `https://www.linkedin.com${jobUrl}`)
+            : "";
           const companyLogo = job
             .find(".artdeco-entity-image")
             .attr("data-delayed-url");
@@ -305,7 +336,7 @@ function parseJobList(jobData) {
             location,
             date,
             salary: salary || "Not specified",
-            jobUrl: jobUrl || "",
+            jobUrl: fullJobUrl,
             companyLogo: companyLogo || "",
             agoTime: agoTime || "",
           };
@@ -326,3 +357,213 @@ function parseJobList(jobData) {
 module.exports.JobCache = JobCache;
 module.exports.clearCache = () => cache.clear();
 module.exports.getCacheSize = () => cache.cache.size;
+
+// Helper function to sanitize filename
+function sanitizeFilename(str) {
+  return str
+    .replace(/[^a-z0-9\s\-_]/gi, "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+// Helper function to save API payload
+function savePayload(payload, keyword, location, start, batchNumber) {
+  try {
+    const payloadDir = path.join(__dirname, "data", "payload");
+    if (!fs.existsSync(payloadDir)) {
+      fs.mkdirSync(payloadDir, { recursive: true });
+    }
+
+    const safeKeyword = sanitizeFilename(keyword || "unknown");
+    const safeLocation = sanitizeFilename(location || "unknown");
+    const timestamp = Date.now();
+    const batch = batchNumber || Math.floor(start / 25) + 1;
+    
+    const filename = `${safeKeyword}_${safeLocation}_batch${batch}_${timestamp}.json`;
+    const filepath = path.join(payloadDir, filename);
+
+    fs.writeFileSync(filepath, payload, "utf8");
+    console.log(`  Saved payload to: ${filepath}`);
+    return filepath;
+  } catch (error) {
+    console.error(`Error saving payload: ${error.message}`);
+    return null;
+  }
+}
+
+// Helper function to get output path
+function getOutputPath(query, locations) {
+  const dataDir = path.join(__dirname, "data");
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  const safeQuery = sanitizeFilename(query);
+  const safeLocation =
+    Array.isArray(locations) && locations.length > 1
+      ? "SFBA_Remote"
+      : sanitizeFilename(Array.isArray(locations) ? locations[0] : locations);
+
+  return path.join(dataDir, `${safeQuery}_${safeLocation}.json`);
+}
+
+// Main runner function that runs all default roles
+async function runAllDefaultRoles(options = {}) {
+  const {
+    limit = 0,
+    jobType = "full time",
+    experienceLevel = "entry level",
+    remoteFilter = "",
+    maxPages = 3,
+    savePayloads = false, // Default: don't save payloads
+  } = options;
+
+  console.log(
+    `Running all ${DEFAULT_ROLES.length} default roles...`
+  );
+  console.log(
+    `Each role will search in '${DEFAULT_LOCATIONS[0]}' and '${DEFAULT_LOCATIONS[1]}'`
+  );
+  console.log(
+    `Total: ${DEFAULT_ROLES.length} roles × ${DEFAULT_LOCATIONS.length} locations = ${DEFAULT_ROLES.length * DEFAULT_LOCATIONS.length} searches\n`
+  );
+
+  const results = {};
+
+  for (const role of DEFAULT_ROLES) {
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`Processing role: ${role}`);
+    console.log(`${"=".repeat(60)}`);
+
+    const allJobs = [];
+
+    // Search each location for this role
+    for (const location of DEFAULT_LOCATIONS) {
+      console.log(`\n--- Searching for '${role}' in '${location}' ---`);
+
+      try {
+        // Set remote filter based on location
+        let effectiveRemoteFilter = remoteFilter;
+        if (!effectiveRemoteFilter) {
+          if (location === "Remote") {
+            effectiveRemoteFilter = "remote";
+          } else {
+            effectiveRemoteFilter = "";
+          }
+        }
+
+        const queryOptions = {
+          keyword: role,
+          location: location,
+          jobType: jobType,
+          experienceLevel: experienceLevel,
+          remoteFilter: effectiveRemoteFilter,
+          limit: limit,
+          page: 0,
+          savePayloads: savePayloads, // Pass through the savePayloads option
+        };
+
+        // Calculate max jobs based on pages (25 jobs per page)
+        const effectiveLimit = limit || maxPages * 25;
+
+        const jobs = await module.exports.query({
+          ...queryOptions,
+          limit: effectiveLimit,
+        });
+
+        console.log(`Found ${jobs.length} jobs for ${role} in ${location}`);
+        allJobs.push(...jobs);
+      } catch (error) {
+        console.error(
+          `Error searching ${role} in ${location}:`,
+          error.message
+        );
+      }
+    }
+
+    // Save combined results to JSON file
+    if (allJobs.length > 0) {
+      const outputPath = getOutputPath(role, DEFAULT_LOCATIONS);
+      
+      // Transform to match Python scraper format for consistency
+      const transformedJobs = allJobs.map((job) => ({
+        title: job.position || "",
+        company: job.company || "",
+        location: job.location || "",
+        link: job.jobUrl || "",
+        posted_time: job.agoTime || job.date || "",
+        salary: job.salary || "",
+        companyLogo: job.companyLogo || "",
+      }));
+
+      fs.writeFileSync(
+        outputPath,
+        JSON.stringify(transformedJobs, null, 2),
+        "utf8"
+      );
+
+      console.log(
+        `✓ Saved ${allJobs.length} jobs to ${outputPath}`
+      );
+      results[role] = {
+        total: allJobs.length,
+        file: outputPath,
+        jobs: transformedJobs,
+      };
+    } else {
+      console.log(`⚠ No jobs found for ${role}`);
+      results[role] = {
+        total: 0,
+        file: null,
+        jobs: [],
+      };
+    }
+  }
+
+  console.log(`\n${"=".repeat(60)}`);
+  console.log(`Completed all ${DEFAULT_ROLES.length} roles!`);
+  console.log(`${"=".repeat(60)}`);
+
+  return results;
+}
+
+// Run as main script if called directly
+if (require.main === module) {
+  // Parse command line arguments (optional)
+  const args = process.argv.slice(2);
+  const options = {
+    limit: 0, // 0 means no limit
+    maxPages: 3,
+    jobType: "full time",
+    experienceLevel: "entry level",
+  };
+
+  // Simple argument parsing
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--limit" && args[i + 1]) {
+      options.limit = parseInt(args[i + 1], 10);
+    } else if (args[i] === "--pages" && args[i + 1]) {
+      options.maxPages = parseInt(args[i + 1], 10);
+    } else if (args[i] === "--save-payloads" || args[i] === "--savePayloads") {
+      options.savePayloads = true;
+    }
+  }
+
+  runAllDefaultRoles(options)
+    .then((results) => {
+      console.log("\nSummary:");
+      Object.entries(results).forEach(([role, data]) => {
+        console.log(`  ${role}: ${data.total} jobs`);
+      });
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error("Fatal error:", error);
+      process.exit(1);
+    });
+}
+
+// Export the main runner function
+module.exports.runAllDefaultRoles = runAllDefaultRoles;
+module.exports.DEFAULT_ROLES = DEFAULT_ROLES;
+module.exports.DEFAULT_LOCATIONS = DEFAULT_LOCATIONS;
