@@ -655,7 +655,7 @@
                           <Table.Td>{log.message || '—'}</Table.Td>
                           <Table.Td>
                             <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>
-                              {log.metadata || '—'}
+                              {log.metadata ? (typeof log.metadata === 'object' ? JSON.stringify(log.metadata, null, 2) : log.metadata) : '—'}
                             </Text>
                           </Table.Td>
                         </Table.Tr>
