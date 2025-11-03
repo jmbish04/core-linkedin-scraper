@@ -1,42 +1,56 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Source: `index.js` (core query, parsing, caching)
-- Tests: `test.js`
-- Package metadata: `package.json`, lockfile
-- Docs: `README.md`
+- Cloudflare Worker source: `src/index.ts` (Hono router, scraping engine, API, cron scheduler, OpenAPI builders).
+- Frontend SPA: `public/index.html` (React + Mantine dashboard served via the `ASSETS` static binding).
+- Configuration: `wrangler.toml` (Worker entry, compatibility flags, bindings, cron schedule, and asset directory).
+- Database migrations: `migrations/` (D1 schema managed via Wrangler migrations).
+- Legacy Node script retained as reference: `index.js`.
+- Tests and utilities: `test.js`, `scripts/`, `analyze_payload.py`.
 
 ## Build, Test, and Development Commands
-- `npm install` — install dependencies
-- `npm test` — run unit tests in `test.js`
-- `node test.js` — ad-hoc local run for manual checks
-- `npm pack` — create local tarball for testing installs
+- `npm install` — install dependencies for local tooling and Wrangler bundling.
+- `npm test` — run unit tests in `test.js` (legacy coverage).
+- `wrangler dev` — run the Worker locally with bound D1 and asset serving.
+- `wrangler d1 migrations apply linkedin-scraper` — apply the latest schema to the D1 database.
 
 ## Coding Style & Naming Conventions
-- JavaScript (Node 18+). Use 2-space indentation.
-- Prefer descriptive names (`queryOptions`, `fetchJobBatch`).
-- Functions: `camelCase`; constants: `UPPER_SNAKE_CASE`.
-- Keep modules small; avoid side effects at import time.
-- Formatting: follow existing style; run a formatter if configured.
+- Worker authored in modern TypeScript (ES modules). Maintain 2-space indentation.
+- Prefer descriptive async function names (`runScrape`, `logAction`).
+- Keep Worker logic stateless; rely on bindings instead of globals where possible.
+- Frontend relies on Mantine components; keep JSX concise and declarative.
+
+## Cloudflare Worker Notes
+- Always log API and cron events via `action_logs` (INSERT with structured metadata).
+- Use Cloudflare Cache API (`caches.default`) for LinkedIn fetches (1-hour TTL).
+- D1 queries must use prepared statements with bound parameters for safety.
+- When adding bindings update `wrangler.toml` and reflect the change here.
+- Static assets are served through `env.ASSETS.fetch`, falling back to `/index.html` for SPA routing.
+
+## Frontend Notes
+- SPA is bundled inside `public/index.html` using UMD builds of React/Mantine and Babel runtime.
+- Keep network calls pointing to `/api/*` to leverage same-origin Worker routes.
+- Ensure interactive components gracefully handle loading/error states.
 
 ## Testing Guidelines
-- Framework: Node assert-style tests in `test.js`.
-- Add tests alongside modifications; cover parsing, URL building, and rate-limit behavior.
-- Name tests after feature: `query-url.spec`, `parser.spec` (if split later).
-- Run with `npm test`; aim to keep tests deterministic and offline.
+- End-to-end checks via `wrangler dev` with mock data recommended.
+- When modifying scraper parsing, add fixtures or describe verification steps in PRs.
+- **Before submitting any pull request, you must run `npm test` (and any other relevant checks) and include the results in the PR summary.**
 
 ## Commit & Pull Request Guidelines
-- Commits: present tense, concise scope (e.g., `feat: add salary filter`, `fix: handle 429 backoff`).
+- Commits: present tense, concise scope (e.g., `feat: add logs endpoint`).
 - PRs: include summary, motivation, screenshots/logs for parsing changes, and steps to verify.
 - Link related issues and note breaking changes.
-- Keep diffs minimal; update README examples if behavior or parameters change.
+- Update README examples if the API contract shifts.
 
 ## Security & Configuration Tips
-- Network calls target LinkedIn guest endpoints; respect robots/ToS in your jurisdiction.
-- Do not hardcode tokens or PII. Use environment variables for host overrides.
-- Avoid aggressive concurrency; keep polite delays to reduce 429s.
+- Do not hardcode credentials. Configure D1 binding via Wrangler secrets/bindings.
+- Respect LinkedIn rate limits; scheduled cron runs sequential scrapes intentionally.
+- Sanitize and validate incoming API payloads.
 
 ## Architecture Overview
-- Query builder composes URL params from options.
-- Fetch layer uses Axios with randomized `User-Agent` and backoff.
-- Parser uses Cheerio to extract fields; cache stores recent results with TTL.
+- `runScrape` composes LinkedIn guest search URLs (ported from `index.js` Query logic).
+- Responses cached via Cache API, parsed with Cheerio, deduped into `job_postings`.
+- API exposes profile CRUD, ad-hoc/profile scrapes, job listings, logs, and OpenAPI spec.
+- Cron handler fetches active profiles and scrapes sequentially to avoid rate limits.
+- Frontend dashboard provides management UI backed by Worker APIs.

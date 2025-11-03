@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LinkedIn Scraper Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        margin: 0;
+        font-family: 'Inter', sans-serif;
+        background-color: #f8f9fa;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@mantine/core@7.11.2/dist/mantine-core.umd.min.js"></script>
+    <script src="https://unpkg.com/@mantine/hooks@7.11.2/dist/mantine-hooks.umd.min.js"></script>
+    <script src="https://unpkg.com/dayjs@1.11.10/dayjs.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script type="text/babel">
+      const {
+        MantineProvider,
+        AppShell,
+        Container,
+        Group,
+        Button,
+        Title,
+        Text,
+        Table,
+        Loader,
+        Modal,
+        TextInput,
+        Textarea,
+        Flex,
+        Tabs,
+        Badge,
+        ScrollArea,
+        Paper,
+        Stack,
+        SegmentedControl,
+        Notification,
+        Anchor,
+        Card,
+        Grid,
+      } = MantineCore;
+      const { useDisclosure } = MantineHooks;
+
+      const apiFetch = async (path, options = {}) => {
+        const response = await fetch(path, {
+          headers: { 'Content-Type': 'application/json' },
+          ...options,
+        });
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          const message = errorBody.error || response.statusText || 'Request failed';
+          throw new Error(message);
+        }
+        const text = await response.text();
+        return text ? JSON.parse(text) : null;
+      };
+
+      const ProfilesManager = ({ onProfilesChange }) => {
+        const [profiles, setProfiles] = React.useState([]);
+        const [loading, setLoading] = React.useState(false);
+        const [modalOpened, { open, close }] = useDisclosure(false);
+        const [formState, setFormState] = React.useState({
+          id: null,
+          profile_name: '',
+          keywords: '',
+          locations: '',
+        });
+        const [error, setError] = React.useState('');
+
+        const loadProfiles = React.useCallback(async () => {
+          setLoading(true);
+          try {
+            const data = await apiFetch('/api/profiles');
+            setProfiles(data);
+            onProfilesChange?.(data);
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setLoading(false);
+          }
+        }, [onProfilesChange]);
+
+        React.useEffect(() => {
+          loadProfiles();
+        }, [loadProfiles]);
+
+        const openCreateModal = () => {
+          setFormState({ id: null, profile_name: '', keywords: '', locations: '' });
+          open();
+        };
+
+        const openEditModal = (profile) => {
+          setFormState({
+            id: profile.id,
+            profile_name: profile.profile_name,
+            keywords: (profile.keywords || []).join(', '),
+            locations: (profile.locations || []).join(', '),
+          });
+          open();
+        };
+
+        const handleSubmit = async () => {
+          try {
+            setError('');
+            const payload = {
+              profile_name: formState.profile_name,
+              keywords: formState.keywords.split(',').map((k) => k.trim()).filter(Boolean),
+              locations: formState.locations.split(',').map((l) => l.trim()).filter(Boolean),
+            };
+
+            if (!payload.profile_name || payload.keywords.length === 0 || payload.locations.length === 0) {
+              throw new Error('Please provide a name, at least one keyword, and one location.');
+            }
+
+            if (formState.id) {
+              await apiFetch(`/api/profiles/${formState.id}`, {
+                method: 'PUT',
+                body: JSON.stringify(payload),
+              });
+            } else {
+              await apiFetch('/api/profiles', {
+                method: 'POST',
+                body: JSON.stringify(payload),
+              });
+            }
+
+            close();
+            await loadProfiles();
+          } catch (err) {
+            setError(err.message);
+          }
+        };
+
+        const handleDeactivate = async (id) => {
+          if (!window.confirm('Deactivate this profile?')) return;
+          try {
+            await apiFetch(`/api/profiles/${id}`, { method: 'DELETE' });
+            await loadProfiles();
+          } catch (err) {
+            setError(err.message);
+          }
+        };
+
+        return (
+          <Stack gap="xl">
+            <Group justify="space-between" align="center">
+              <div>
+                <Title order={2}>Search Profiles</Title>
+                <Text c="dimmed" size="sm">
+                  Manage reusable scraping configurations.
+                </Text>
+              </div>
+              <Button onClick={openCreateModal}>New Profile</Button>
+            </Group>
+            {error && (
+              <Notification color="red" title="Error" onClose={() => setError('')}>
+                {error}
+              </Notification>
+            )}
+            <Paper withBorder shadow="xs" radius="md" p="md">
+              {loading ? (
+                <Flex justify="center" align="center" style={{ minHeight: 160 }}>
+                  <Loader />
+                </Flex>
+              ) : profiles.length === 0 ? (
+                <Flex justify="center" align="center" style={{ minHeight: 160 }}>
+                  <Text c="dimmed">No profiles yet. Create one to get started.</Text>
+                </Flex>
+              ) : (
+                <ScrollArea h={320}>
+                  <Table highlightOnHover striped>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Name</Table.Th>
+                        <Table.Th>Keywords</Table.Th>
+                        <Table.Th>Locations</Table.Th>
+                        <Table.Th>Status</Table.Th>
+                        <Table.Th>Created</Table.Th>
+                        <Table.Th style={{ width: 120 }}>Actions</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {profiles.map((profile) => (
+                        <Table.Tr key={profile.id}>
+                          <Table.Td>{profile.profile_name}</Table.Td>
+                          <Table.Td>
+                            <Group gap="xs" wrap="wrap">
+                              {(profile.keywords || []).map((keyword) => (
+                                <Badge key={keyword}>{keyword}</Badge>
+                              ))}
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap="xs" wrap="wrap">
+                              {(profile.locations || []).map((loc) => (
+                                <Badge variant="light" key={loc}>
+                                  {loc}
+                                </Badge>
+                              ))}
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            {profile.is_active ? <Badge color="green">Active</Badge> : <Badge color="gray">Inactive</Badge>}
+                          </Table.Td>
+                          <Table.Td>{profile.created_at ? new Date(profile.created_at).toLocaleString() : '—'}</Table.Td>
+                          <Table.Td>
+                            <Group gap="xs">
+                              <Button size="xs" variant="light" onClick={() => openEditModal(profile)}>
+                                Edit
+                              </Button>
+                              <Button size="xs" color="red" variant="light" onClick={() => handleDeactivate(profile.id)}>
+                                Deactivate
+                              </Button>
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+              )}
+            </Paper>
+
+            <Modal opened={modalOpened} onClose={close} title={formState.id ? 'Edit Profile' : 'New Profile'} centered size="lg">
+              <Stack>
+                <TextInput
+                  label="Profile name"
+                  placeholder="AI Product Roles"
+                  value={formState.profile_name}
+                  onChange={(event) => setFormState((prev) => ({ ...prev, profile_name: event.target.value }))}
+                  required
+                />
+                <Textarea
+                  label="Keywords"
+                  description="Comma separated"
+                  placeholder="Data Engineer, Machine Learning Engineer"
+                  minRows={2}
+                  value={formState.keywords}
+                  onChange={(event) => setFormState((prev) => ({ ...prev, keywords: event.target.value }))}
+                />
+                <Textarea
+                  label="Locations"
+                  description="Comma separated"
+                  placeholder="San Francisco Bay Area, Remote"
+                  minRows={2}
+                  value={formState.locations}
+                  onChange={(event) => setFormState((prev) => ({ ...prev, locations: event.target.value }))}
+                />
+                <Group justify="flex-end">
+                  <Button variant="default" onClick={close}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSubmit}>{formState.id ? 'Update' : 'Create'}</Button>
+                </Group>
+              </Stack>
+            </Modal>
+          </Stack>
+        );
+      };
+
+      const SearchRunner = ({ profiles }) => {
+        const [activeTab, setActiveTab] = React.useState('adhoc');
+        const [keywords, setKeywords] = React.useState('');
+        const [locations, setLocations] = React.useState('');
+        const [selectedProfiles, setSelectedProfiles] = React.useState([]);
+        const [loading, setLoading] = React.useState(false);
+        const [resultMessage, setResultMessage] = React.useState('');
+        const [error, setError] = React.useState('');
+
+        const runAdhoc = async () => {
+          const keywordList = keywords.split(',').map((k) => k.trim()).filter(Boolean);
+          const locationList = locations.split(',').map((l) => l.trim()).filter(Boolean);
+          if (keywordList.length === 0 || locationList.length === 0) {
+            setError('Provide at least one keyword and location.');
+            return;
+          }
+          setLoading(true);
+          setError('');
+          try {
+            const response = await apiFetch('/api/searches/run-adhoc', {
+              method: 'POST',
+              body: JSON.stringify({ keywords: keywordList, locations: locationList }),
+            });
+            setResultMessage(`Scrape completed with ${response.jobs.length} job(s).`);
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        const toggleProfile = (id) => {
+          setSelectedProfiles((prev) =>
+            prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+          );
+        };
+
+        const runProfiles = async () => {
+          if (selectedProfiles.length === 0) {
+            setError('Select at least one profile to run.');
+            return;
+          }
+          setLoading(true);
+          setError('');
+          try {
+            const response = await apiFetch('/api/searches/run-profiles', {
+              method: 'POST',
+              body: JSON.stringify({ profile_ids: selectedProfiles }),
+            });
+            setResultMessage(`Triggered ${response.totalRuns} scrape(s).`);
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        return (
+          <Stack gap="lg">
+            <Group justify="space-between" align="flex-end">
+              <div>
+                <Title order={2}>On-Demand Searches</Title>
+                <Text c="dimmed" size="sm">
+                  Run quick checks or execute stored profiles on demand.
+                </Text>
+              </div>
+              <SegmentedControl
+                value={activeTab}
+                onChange={setActiveTab}
+                data={[{ label: 'Ad-hoc', value: 'adhoc' }, { label: 'Profiles', value: 'profiles' }]}
+              />
+            </Group>
+            {error && (
+              <Notification color="red" title="Error" onClose={() => setError('')}>
+                {error}
+              </Notification>
+            )}
+            {resultMessage && (
+              <Notification color="green" title="Success" onClose={() => setResultMessage('')}>
+                {resultMessage}
+              </Notification>
+            )}
+            {activeTab === 'adhoc' ? (
+              <Card withBorder shadow="sm" radius="md" p="lg">
+                <Stack gap="md">
+                  <Textarea
+                    label="Keywords"
+                    placeholder="Data Engineer, Machine Learning"
+                    minRows={2}
+                    value={keywords}
+                    onChange={(event) => setKeywords(event.target.value)}
+                  />
+                  <Textarea
+                    label="Locations"
+                    placeholder="Remote, San Francisco Bay Area"
+                    minRows={2}
+                    value={locations}
+                    onChange={(event) => setLocations(event.target.value)}
+                  />
+                  <Group justify="flex-end">
+                    <Button loading={loading} onClick={runAdhoc}>
+                      Run ad-hoc search
+                    </Button>
+                  </Group>
+                </Stack>
+              </Card>
+            ) : (
+              <Card withBorder shadow="sm" radius="md" p="lg">
+                <Stack gap="md">
+                  <Text c="dimmed" size="sm">
+                    Select one or more active profiles to run immediately.
+                  </Text>
+                  <ScrollArea h={220}>
+                    <Stack gap="xs">
+                      {profiles.filter((p) => p.is_active).length === 0 ? (
+                        <Text c="dimmed">No active profiles available.</Text>
+                      ) : (
+                        profiles
+                          .filter((p) => p.is_active)
+                          .map((profile) => (
+                            <Paper
+                              key={profile.id}
+                              withBorder
+                              shadow={selectedProfiles.includes(profile.id) ? 'sm' : 'xs'}
+                              radius="md"
+                              p="md"
+                              onClick={() => toggleProfile(profile.id)}
+                              style={{
+                                borderColor: selectedProfiles.includes(profile.id) ? '#228be6' : undefined,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <Group justify="space-between" align="flex-start">
+                                <div>
+                                  <Text fw={600}>{profile.profile_name}</Text>
+                                  <Group gap="xs" mt="xs">
+                                    {(profile.keywords || []).map((keyword) => (
+                                      <Badge key={keyword}>{keyword}</Badge>
+                                    ))}
+                                  </Group>
+                                  <Group gap="xs" mt="xs">
+                                    {(profile.locations || []).map((loc) => (
+                                      <Badge variant="light" key={loc}>
+                                        {loc}
+                                      </Badge>
+                                    ))}
+                                  </Group>
+                                </div>
+                                <Badge color={selectedProfiles.includes(profile.id) ? 'blue' : 'gray'}>
+                                  {selectedProfiles.includes(profile.id) ? 'Selected' : 'Tap to select'}
+                                </Badge>
+                              </Group>
+                            </Paper>
+                          ))
+                      )}
+                    </Stack>
+                  </ScrollArea>
+                  <Group justify="flex-end">
+                    <Button loading={loading} onClick={runProfiles}>
+                      Run selected profiles
+                    </Button>
+                  </Group>
+                </Stack>
+              </Card>
+            )}
+          </Stack>
+        );
+      };
+
+      const JobsViewer = () => {
+        const [jobs, setJobs] = React.useState([]);
+        const [loading, setLoading] = React.useState(false);
+        const [search, setSearch] = React.useState('');
+        const [keyword, setKeyword] = React.useState('');
+        const [location, setLocation] = React.useState('');
+        const [startDate, setStartDate] = React.useState('');
+        const [endDate, setEndDate] = React.useState('');
+        const [total, setTotal] = React.useState(0);
+        const [page, setPage] = React.useState(0);
+        const limit = 25;
+
+        const loadJobs = React.useCallback(async () => {
+          setLoading(true);
+          try {
+            const params = new URLSearchParams({ limit: String(limit), offset: String(page * limit) });
+            if (search) params.set('search', search);
+            if (keyword) params.set('keyword', keyword);
+            if (location) params.set('location', location);
+            if (startDate) params.set('start_date', startDate);
+            if (endDate) params.set('end_date', endDate);
+            const data = await apiFetch(`/api/jobs?${params.toString()}`);
+            setJobs(data.jobs || []);
+            setTotal(data.total || 0);
+          } catch (err) {
+            console.error(err);
+          } finally {
+            setLoading(false);
+          }
+        }, [search, keyword, location, startDate, endDate, page]);
+
+        React.useEffect(() => {
+          loadJobs();
+        }, [loadJobs]);
+
+        const totalPages = Math.ceil(total / limit) || 1;
+
+        return (
+          <Stack gap="lg">
+            <Group justify="space-between" align="flex-end" wrap="wrap">
+              <div>
+                <Title order={2}>Job Postings</Title>
+                <Text c="dimmed" size="sm">
+                  Explore the latest results stored in the database.
+                </Text>
+              </div>
+            </Group>
+            <Paper withBorder shadow="xs" radius="md" p="md">
+              <Grid gutter="md">
+                <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+                  <TextInput label="Search" placeholder="Position or company" value={search} onChange={(event) => setSearch(event.target.value)} />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+                  <TextInput label="Keyword" placeholder="Data Engineer" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+                  <TextInput label="Location" placeholder="Remote" value={location} onChange={(event) => setLocation(event.target.value)} />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+                  <TextInput label="Start date" placeholder="2024-01-01" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+                  <TextInput label="End date" placeholder="2024-01-31" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+                  <Button onClick={() => setPage(0)} variant="light">
+                    Reset page
+                  </Button>
+                </Grid.Col>
+              </Grid>
+            </Paper>
+            <Paper withBorder shadow="xs" radius="md" p="md">
+              {loading ? (
+                <Flex justify="center" align="center" style={{ minHeight: 200 }}>
+                  <Loader />
+                </Flex>
+              ) : jobs.length === 0 ? (
+                <Flex justify="center" align="center" style={{ minHeight: 200 }}>
+                  <Text c="dimmed">No job postings found.</Text>
+                </Flex>
+              ) : (
+                <ScrollArea h={420}>
+                  <Table highlightOnHover withBorder>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Position</Table.Th>
+                        <Table.Th>Company</Table.Th>
+                        <Table.Th>Location</Table.Th>
+                        <Table.Th>Keyword</Table.Th>
+                        <Table.Th>Scraped</Table.Th>
+                        <Table.Th>Link</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {jobs.map((job) => (
+                        <Table.Tr key={job.job_urn}>
+                          <Table.Td>
+                            <Stack gap={4}>
+                              <Text fw={600}>{job.position}</Text>
+                              {job.insights && <Text size="sm" c="dimmed">{job.insights}</Text>}
+                            </Stack>
+                          </Table.Td>
+                          <Table.Td>{job.company}</Table.Td>
+                          <Table.Td>{job.location}</Table.Td>
+                          <Table.Td>
+                            <Badge>{job.search_keyword}</Badge>
+                          </Table.Td>
+                          <Table.Td>{job.last_scraped_at ? new Date(job.last_scraped_at).toLocaleString() : '—'}</Table.Td>
+                          <Table.Td>
+                            {job.job_url ? (
+                              <Anchor href={job.job_url} target="_blank" rel="noreferrer">
+                                View
+                              </Anchor>
+                            ) : (
+                              '—'
+                            )}
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+              )}
+              <Group justify="space-between" mt="md">
+                <Text size="sm" c="dimmed">
+                  Showing {jobs.length} of {total} results
+                </Text>
+                <Group>
+                  <Button variant="default" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                    Previous
+                  </Button>
+                  <Text size="sm">
+                    Page {page + 1} / {totalPages}
+                  </Text>
+                  <Button
+                    variant="default"
+                    disabled={page + 1 >= totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </Group>
+              </Group>
+            </Paper>
+          </Stack>
+        );
+      };
+
+      const LogsViewer = () => {
+        const [logs, setLogs] = React.useState([]);
+        const [loading, setLoading] = React.useState(false);
+
+        const loadLogs = React.useCallback(async () => {
+          setLoading(true);
+          try {
+            const data = await apiFetch('/api/logs?limit=100');
+            setLogs(data.logs || []);
+          } catch (err) {
+            console.error(err);
+          } finally {
+            setLoading(false);
+          }
+        }, []);
+
+        React.useEffect(() => {
+          loadLogs();
+        }, [loadLogs]);
+
+        return (
+          <Stack gap="lg">
+            <Group justify="space-between">
+              <div>
+                <Title order={2}>Action Logs</Title>
+                <Text c="dimmed" size="sm">
+                  Monitor recent worker activity and API usage.
+                </Text>
+              </div>
+              <Button variant="light" onClick={loadLogs}>
+                Refresh
+              </Button>
+            </Group>
+            <Paper withBorder shadow="xs" radius="md" p="md">
+              {loading ? (
+                <Flex justify="center" align="center" style={{ minHeight: 200 }}>
+                  <Loader />
+                </Flex>
+              ) : logs.length === 0 ? (
+                <Flex justify="center" align="center" style={{ minHeight: 200 }}>
+                  <Text c="dimmed">No logs available yet.</Text>
+                </Flex>
+              ) : (
+                <ScrollArea h={400}>
+                  <Table highlightOnHover>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Timestamp</Table.Th>
+                        <Table.Th>Action</Table.Th>
+                        <Table.Th>Status</Table.Th>
+                        <Table.Th>Message</Table.Th>
+                        <Table.Th>Metadata</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {logs.map((log) => (
+                        <Table.Tr key={log.id}>
+                          <Table.Td>{log.timestamp ? new Date(log.timestamp).toLocaleString() : '—'}</Table.Td>
+                          <Table.Td>{log.action_type}</Table.Td>
+                          <Table.Td>
+                            <Badge color={log.status === 'error' ? 'red' : log.status === 'success' ? 'green' : 'gray'}>
+                              {log.status}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>{log.message || '—'}</Table.Td>
+                          <Table.Td>
+                            <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>
+                              {log.metadata ? (typeof log.metadata === 'object' ? JSON.stringify(log.metadata, null, 2) : log.metadata) : '—'}
+                            </Text>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+              )}
+            </Paper>
+          </Stack>
+        );
+      };
+
+      const Dashboard = () => {
+        const [profiles, setProfiles] = React.useState([]);
+
+        return (
+          <MantineProvider defaultColorScheme="light">
+            <AppShell
+              header={{ height: 60 }}
+              padding="lg"
+              styles={{
+                main: {
+                  backgroundColor: '#f5f7fb',
+                },
+              }}
+            >
+              <AppShell.Header>
+                <Group justify="space-between" h="100%" px="lg">
+                  <Group gap="xs">
+                    <Title order={3}>LinkedIn Scraper Console</Title>
+                    <Badge color="blue">Cloudflare Worker</Badge>
+                  </Group>
+                  <Anchor href="/openapi.yaml" target="_blank" rel="noreferrer">
+                    OpenAPI Spec
+                  </Anchor>
+                </Group>
+              </AppShell.Header>
+              <AppShell.Main>
+                <Container size="xl" pb="xl">
+                  <Tabs defaultValue="profiles" keepMounted={false}>
+                    <Tabs.List>
+                      <Tabs.Tab value="profiles">Profiles</Tabs.Tab>
+                      <Tabs.Tab value="runner">Run Searches</Tabs.Tab>
+                      <Tabs.Tab value="jobs">Jobs</Tabs.Tab>
+                      <Tabs.Tab value="logs">Logs</Tabs.Tab>
+                    </Tabs.List>
+                    <Tabs.Panel value="profiles" pt="md">
+                      <ProfilesManager onProfilesChange={setProfiles} />
+                    </Tabs.Panel>
+                    <Tabs.Panel value="runner" pt="md">
+                      <SearchRunner profiles={profiles} />
+                    </Tabs.Panel>
+                    <Tabs.Panel value="jobs" pt="md">
+                      <JobsViewer />
+                    </Tabs.Panel>
+                    <Tabs.Panel value="logs" pt="md">
+                      <LogsViewer />
+                    </Tabs.Panel>
+                  </Tabs>
+                </Container>
+              </AppShell.Main>
+            </AppShell>
+          </MantineProvider>
+        );
+      };
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<Dashboard />);
+    </script>
+  </body>
+</html>

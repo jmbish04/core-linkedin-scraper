@@ -1,0 +1,21 @@
+name = "linkedin-scraper-worker"
+main = "src/index.ts"
+compatibility_date = "2025-03-07"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[triggers]
+cron = "0 */12 * * *"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "linkedin-scraper"
+database_id = "4132c81b-dbf5-415f-a6fe-5e60f9124886"
+migrations_dir = "migrations"
+
+[assets]
+binding = "ASSETS"
+directory = "./public"
