@@ -976,13 +976,14 @@ app.post('/api/searches/run-adhoc', async (c) => {
     throw new HTTPException(400, { message: 'keywords and locations must be non-empty arrays.' });
   }
 
-  const results: JobPostingRecord[] = [];
+  const scrapePromises: Promise<JobPostingRecord[]>[] = [];
   for (const keyword of keywords) {
     for (const location of locations) {
-      const jobs = await runScrape(c.env, keyword, location);
-      results.push(...jobs);
+      scrapePromises.push(runScrape(c.env, keyword, location));
     }
   }
+  const jobSets = await Promise.all(scrapePromises);
+  const results = jobSets.flat();
 
   await logAction(c.env, 'api_run_adhoc', 'success', 'Ad-hoc scrape completed', {
     keywords,
