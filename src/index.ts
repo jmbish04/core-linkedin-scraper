@@ -397,24 +397,25 @@ async function runScrape(env: Bindings, searchKeyword: string, searchLocation: s
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    for (const job of jobs) {
-      await statement
-        .bind(
-          job.job_urn,
-          job.position,
-          job.company,
-          job.location,
-          job.salary,
-          job.job_url,
-          job.company_logo_url,
-          job.posted_time_text,
-          job.posted_date,
-          job.insights,
-          job.search_keyword,
-          job.search_location,
-          nowIso
-        )
-        .run();
+    const statements = jobs.map((job) =>
+      statement.bind(
+        job.job_urn,
+        job.position,
+        job.company,
+        job.location,
+        job.salary,
+        job.job_url,
+        job.company_logo_url,
+        job.posted_time_text,
+        job.posted_date,
+        job.insights,
+        job.search_keyword,
+        job.search_location,
+        nowIso
+      )
+    );
+    if (statements.length > 0) {
+      await env.DB.batch(statements);
     }
 
     await logAction(env, 'scrape_run_success', 'success', 'Scrape completed', {
