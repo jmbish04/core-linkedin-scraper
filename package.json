@@ -4,11 +4,13 @@
   "description": "advanced node.js package for getting job listings from LinkedIn",
   "main": "index.js",
   "scripts": {
+    "dev": "wrangler dev",
     "test": "node test.js",
-    "start": "node index.js",
+    "start": "wrangler dev",
     "search": "node index.js",
-    "deploy": "npm run migrate:db:remote && wrangler deploy",
-    "migrate:db:remote": "wrangler d1 migrate DB apply --remote"
+    "migrate:db:remote": "wrangler d1 migrations apply DB --remote",
+    "migrate:db:local": "wrangler d1 migrations apply DB --local",
+    "deploy": "npm run migrate:db:remote && wrangler deploy"
   },
   "repository": {
     "type": "git",
