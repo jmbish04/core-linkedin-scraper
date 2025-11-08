@@ -6,7 +6,9 @@
   "scripts": {
     "test": "node test.js",
     "start": "node index.js",
-    "search": "node index.js"
+    "search": "node index.js",
+    "deploy": "npm run migrate:db:remote && wrangler deploy",
+    "migrate:db:remote": "wrangler d1 migrate DB apply --remote"
   },
   "repository": {
     "type": "git",
