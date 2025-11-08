@@ -1,4 +1,4 @@
-name = "linkedin-scraper-worker"
+name = "core-linkedin-scraper"
 main = "src/index.ts"
 compatibility_date = "2025-03-07"
 compatibility_flags = ["nodejs_compat"]
