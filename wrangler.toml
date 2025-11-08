@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 enabled = true
 head_sampling_rate = 1
 
-[triggers]
+[[triggers.crons]]
 cron = "0 */12 * * *"
 
 [[d1_databases]]
@@ -15,6 +15,18 @@ binding = "DB"
 database_name = "linkedin-scraper"
 database_id = "4132c81b-dbf5-415f-a6fe-5e60f9124886"
 migrations_dir = "migrations"
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "JOBS_WEBSOCKET"
+class_name = "JobsWebSocket"
+script_name = "core-linkedin-scraper"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["JobsWebSocket"]
 
 [assets]
 binding = "ASSETS"

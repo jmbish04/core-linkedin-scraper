@@ -4,6 +4,8 @@ import { HTTPException } from 'hono/http-exception';
 import { stringify as stringifyYaml } from 'yaml';
 import { load } from 'cheerio';
 
+export { JobsWebSocket } from './websocket';
+
 const DEFAULT_ROLES = [
   'Data Engineer',
   'AI PM',
@@ -32,6 +34,8 @@ type LogStatus = 'success' | 'error' | 'info';
 type Bindings = {
   DB: D1Database;
   ASSETS: Fetcher;
+  AI: Ai;
+  JOBS_WEBSOCKET: DurableObjectNamespace;
 };
 
 type Variables = Record<string, never>;
@@ -73,6 +77,11 @@ interface JobPostingRow {
   search_keyword: string;
   search_location: string;
   last_scraped_at: string | null;
+  ai_category: string | null;
+  ai_skills: string | null;
+  ai_summary: string | null;
+  ai_seniority_level: string | null;
+  ai_enriched_at: string | null;
 }
 
 interface JobPostingRecord {
@@ -88,6 +97,11 @@ interface JobPostingRecord {
   insights: string;
   search_keyword: string;
   search_location: string;
+  ai_category?: string;
+  ai_skills?: string[];
+  ai_summary?: string;
+  ai_seniority_level?: string;
+  ai_enriched_at?: string;
 }
 
 interface ActionLogRow {
@@ -359,6 +373,67 @@ function parseJobs(html: string, searchKeyword: string, searchLocation: string):
   return jobs;
 }
 
+interface AIEnrichmentResult {
+  category: string;
+  skills: string[];
+  summary: string;
+  seniority_level: string;
+}
+
+async function enrichJobWithAI(env: Bindings, job: JobPostingRecord): Promise<AIEnrichmentResult> {
+  const prompt = `Analyze this job posting and extract the following information in JSON format:
+- category: The job category (e.g., "Software Engineering", "Data Science", "Product Management", "Sales", "Marketing", etc.)
+- skills: Array of technical skills or tools mentioned (e.g., ["Python", "SQL", "AWS"])
+- summary: A brief 1-2 sentence summary of the role
+- seniority_level: The seniority level (e.g., "Entry", "Mid", "Senior", "Lead", "Executive")
+
+Job Details:
+Position: ${job.position}
+Company: ${job.company}
+Location: ${job.location}
+Insights: ${job.insights || 'N/A'}
+
+Respond ONLY with valid JSON, no additional text.`;
+
+  try {
+    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a job posting analyzer. Respond only with valid JSON matching the requested schema.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 500,
+    });
+
+    const text = typeof response === 'object' && 'response' in response ? response.response : JSON.stringify(response);
+    const cleanText = String(text)
+      .trim()
+      .replace(/^```json\s*/, '')
+      .replace(/^```\s*/, '')
+      .replace(/```\s*$/, '');
+
+    const parsed = JSON.parse(cleanText);
+
+    return {
+      category: parsed.category || 'Uncategorized',
+      skills: Array.isArray(parsed.skills) ? parsed.skills : [],
+      summary: parsed.summary || '',
+      seniority_level: parsed.seniority_level || 'Not specified',
+    };
+  } catch (error) {
+    console.error('AI enrichment failed:', error);
+    return {
+      category: 'Uncategorized',
+      skills: [],
+      summary: '',
+      seniority_level: 'Not specified',
+    };
+  }
+}
+
 async function runScrape(env: Bindings, searchKeyword: string, searchLocation: string): Promise<JobPostingRecord[]> {
   const metadata = { keyword: searchKeyword, location: searchLocation };
   await logAction(env, 'scrape_run_start', 'info', 'Scrape started', metadata);
@@ -390,14 +465,31 @@ async function runScrape(env: Bindings, searchKeyword: string, searchLocation: s
 
     const jobs = parseJobs(html, searchKeyword, searchLocation);
     const nowIso = new Date().toISOString();
+
+    // Enrich jobs with AI
+    const enrichedJobs = await Promise.all(
+      jobs.map(async (job) => {
+        const enrichment = await enrichJobWithAI(env, job);
+        return {
+          ...job,
+          ai_category: enrichment.category,
+          ai_skills: enrichment.skills,
+          ai_summary: enrichment.summary,
+          ai_seniority_level: enrichment.seniority_level,
+          ai_enriched_at: nowIso,
+        };
+      })
+    );
+
     const statement = env.DB.prepare(
       `INSERT OR REPLACE INTO job_postings (
         job_urn, position, company, location, salary, job_url, company_logo_url,
-        posted_time_text, posted_date, insights, search_keyword, search_location, last_scraped_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        posted_time_text, posted_date, insights, search_keyword, search_location, last_scraped_at,
+        ai_category, ai_skills, ai_summary, ai_seniority_level, ai_enriched_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    const statements = jobs.map((job) =>
+    const statements = enrichedJobs.map((job) =>
       statement.bind(
         job.job_urn,
         job.position,
@@ -411,7 +503,12 @@ async function runScrape(env: Bindings, searchKeyword: string, searchLocation: s
         job.insights,
         job.search_keyword,
         job.search_location,
-        nowIso
+        nowIso,
+        job.ai_category,
+        job.ai_skills ? JSON.stringify(job.ai_skills) : null,
+        job.ai_summary,
+        job.ai_seniority_level,
+        job.ai_enriched_at
       )
     );
     if (statements.length > 0) {
@@ -420,10 +517,10 @@ async function runScrape(env: Bindings, searchKeyword: string, searchLocation: s
 
     await logAction(env, 'scrape_run_success', 'success', 'Scrape completed', {
       ...metadata,
-      inserted: jobs.length,
+      inserted: enrichedJobs.length,
     });
 
-    return jobs;
+    return enrichedJobs;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown scrape failure';
     await logAction(env, 'scrape_run_error', 'error', message, {
@@ -445,7 +542,16 @@ function mapProfileRow(row: SearchProfileRow): SearchProfile {
   };
 }
 
-function mapJobRow(row: JobPostingRow): JobPostingRow {
+function mapJobRow(row: JobPostingRow): JobPostingRow & { ai_skills_parsed?: string[] } {
+  let aiSkillsParsed: string[] = [];
+  if (row.ai_skills) {
+    try {
+      aiSkillsParsed = JSON.parse(row.ai_skills);
+    } catch {
+      aiSkillsParsed = [];
+    }
+  }
+
   return {
     job_urn: row.job_urn,
     position: row.position,
@@ -460,6 +566,12 @@ function mapJobRow(row: JobPostingRow): JobPostingRow {
     search_keyword: row.search_keyword,
     search_location: row.search_location,
     last_scraped_at: row.last_scraped_at,
+    ai_category: row.ai_category,
+    ai_skills: row.ai_skills,
+    ai_skills_parsed: aiSkillsParsed,
+    ai_summary: row.ai_summary,
+    ai_seniority_level: row.ai_seniority_level,
+    ai_enriched_at: row.ai_enriched_at,
   };
 }
 
@@ -530,6 +642,12 @@ function buildOpenAPISpec(origin: string) {
             search_keyword: { type: 'string' },
             search_location: { type: 'string' },
             last_scraped_at: { type: 'string', nullable: true, format: 'date-time' },
+            ai_category: { type: 'string', nullable: true },
+            ai_skills: { type: 'string', nullable: true },
+            ai_skills_parsed: { type: 'array', items: { type: 'string' }, nullable: true },
+            ai_summary: { type: 'string', nullable: true },
+            ai_seniority_level: { type: 'string', nullable: true },
+            ai_enriched_at: { type: 'string', nullable: true, format: 'date-time' },
           },
         },
         ActionLog: {
@@ -807,6 +925,8 @@ function buildOpenAPISpec(origin: string) {
             { name: 'location', in: 'query', schema: { type: 'string' } },
             { name: 'start_date', in: 'query', schema: { type: 'string', format: 'date' } },
             { name: 'end_date', in: 'query', schema: { type: 'string', format: 'date' } },
+            { name: 'ai_category', in: 'query', schema: { type: 'string' } },
+            { name: 'ai_seniority', in: 'query', schema: { type: 'string' } },
             { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
             { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0 } },
           ],
@@ -1033,7 +1153,7 @@ app.post('/api/searches/run-profiles', async (c) => {
 });
 
 app.get('/api/jobs', async (c) => {
-  const { search, keyword, location, start_date, end_date } = c.req.query();
+  const { search, keyword, location, start_date, end_date, ai_category, ai_seniority } = c.req.query();
   const limit = Math.min(Math.max(parseInt(c.req.query('limit') ?? '25', 10) || 25, 1), 100);
   const offset = Math.max(parseInt(c.req.query('offset') ?? '0', 10) || 0, 0);
 
@@ -1063,6 +1183,16 @@ app.get('/api/jobs', async (c) => {
   if (end_date) {
     filters.push('date(last_scraped_at) <= date(?)');
     bindings.push(end_date);
+  }
+
+  if (ai_category) {
+    filters.push('ai_category = ?');
+    bindings.push(ai_category);
+  }
+
+  if (ai_seniority) {
+    filters.push('ai_seniority_level = ?');
+    bindings.push(ai_seniority);
   }
 
   const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
@@ -1121,6 +1251,20 @@ app.get('/openapi.yaml', async (c) => {
     format: 'yaml',
   });
   return c.text(yaml, 200, { 'Content-Type': 'application/yaml; charset=utf-8' });
+});
+
+app.get('/ws', async (c) => {
+  const upgradeHeader = c.req.header('Upgrade');
+  if (!upgradeHeader || upgradeHeader !== 'websocket') {
+    return c.text('Expected Upgrade: websocket', 426);
+  }
+
+  // Get or create a Durable Object instance
+  const id = c.env.JOBS_WEBSOCKET.idFromName('jobs-ws');
+  const stub = c.env.JOBS_WEBSOCKET.get(id);
+
+  // Forward the request to the Durable Object
+  return stub.fetch(c.req.raw);
 });
 
 app.all('*', async (c) => {

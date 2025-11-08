@@ -446,6 +446,8 @@
         const [search, setSearch] = React.useState('');
         const [keyword, setKeyword] = React.useState('');
         const [location, setLocation] = React.useState('');
+        const [aiCategory, setAiCategory] = React.useState('');
+        const [aiSeniority, setAiSeniority] = React.useState('');
         const [startDate, setStartDate] = React.useState('');
         const [endDate, setEndDate] = React.useState('');
         const [total, setTotal] = React.useState(0);
@@ -459,6 +461,8 @@
             if (search) params.set('search', search);
             if (keyword) params.set('keyword', keyword);
             if (location) params.set('location', location);
+            if (aiCategory) params.set('ai_category', aiCategory);
+            if (aiSeniority) params.set('ai_seniority', aiSeniority);
             if (startDate) params.set('start_date', startDate);
             if (endDate) params.set('end_date', endDate);
             const data = await apiFetch(`/api/jobs?${params.toString()}`);
@@ -469,7 +473,7 @@
           } finally {
             setLoading(false);
           }
-        }, [search, keyword, location, startDate, endDate, page]);
+        }, [search, keyword, location, aiCategory, aiSeniority, startDate, endDate, page]);
 
         React.useEffect(() => {
           loadJobs();
@@ -497,6 +501,12 @@
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
                   <TextInput label="Location" placeholder="Remote" value={location} onChange={(event) => setLocation(event.target.value)} />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+                  <TextInput label="AI Category" placeholder="Software Engineering" value={aiCategory} onChange={(event) => setAiCategory(event.target.value)} />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
+                  <TextInput label="AI Seniority" placeholder="Senior" value={aiSeniority} onChange={(event) => setAiSeniority(event.target.value)} />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, lg: 3 }}>
                   <TextInput label="Start date" placeholder="2024-01-01" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
@@ -528,37 +538,62 @@
                         <Table.Th>Position</Table.Th>
                         <Table.Th>Company</Table.Th>
                         <Table.Th>Location</Table.Th>
-                        <Table.Th>Keyword</Table.Th>
-                        <Table.Th>Scraped</Table.Th>
+                        <Table.Th>AI Category</Table.Th>
+                        <Table.Th>AI Seniority</Table.Th>
+                        <Table.Th>Skills</Table.Th>
                         <Table.Th>Link</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
-                      {jobs.map((job) => (
-                        <Table.Tr key={job.job_urn}>
-                          <Table.Td>
-                            <Stack gap={4}>
-                              <Text fw={600}>{job.position}</Text>
-                              {job.insights && <Text size="sm" c="dimmed">{job.insights}</Text>}
-                            </Stack>
-                          </Table.Td>
-                          <Table.Td>{job.company}</Table.Td>
-                          <Table.Td>{job.location}</Table.Td>
-                          <Table.Td>
-                            <Badge>{job.search_keyword}</Badge>
-                          </Table.Td>
-                          <Table.Td>{job.last_scraped_at ? new Date(job.last_scraped_at).toLocaleString() : '—'}</Table.Td>
-                          <Table.Td>
-                            {job.job_url ? (
-                              <Anchor href={job.job_url} target="_blank" rel="noreferrer">
-                                View
-                              </Anchor>
-                            ) : (
-                              '—'
-                            )}
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
+                      {jobs.map((job) => {
+                        let skills = [];
+                        if (job.ai_skills_parsed) {
+                          skills = job.ai_skills_parsed;
+                        } else if (job.ai_skills) {
+                          try {
+                            skills = JSON.parse(job.ai_skills);
+                          } catch (e) {
+                            skills = [];
+                          }
+                        }
+
+                        return (
+                          <Table.Tr key={job.job_urn}>
+                            <Table.Td>
+                              <Stack gap={4}>
+                                <Text fw={600}>{job.position}</Text>
+                                {job.ai_summary && <Text size="sm" c="dimmed">{job.ai_summary}</Text>}
+                                {job.insights && <Text size="xs" c="dimmed">{job.insights}</Text>}
+                              </Stack>
+                            </Table.Td>
+                            <Table.Td>{job.company}</Table.Td>
+                            <Table.Td>{job.location}</Table.Td>
+                            <Table.Td>
+                              {job.ai_category ? <Badge color="blue">{job.ai_category}</Badge> : '—'}
+                            </Table.Td>
+                            <Table.Td>
+                              {job.ai_seniority_level ? <Badge color="grape">{job.ai_seniority_level}</Badge> : '—'}
+                            </Table.Td>
+                            <Table.Td>
+                              <Group gap="xs">
+                                {skills.length > 0 ? skills.slice(0, 3).map((skill) => (
+                                  <Badge key={skill} size="xs" color="teal">{skill}</Badge>
+                                )) : '—'}
+                                {skills.length > 3 && <Text size="xs" c="dimmed">+{skills.length - 3}</Text>}
+                              </Group>
+                            </Table.Td>
+                            <Table.Td>
+                              {job.job_url ? (
+                                <Anchor href={job.job_url} target="_blank" rel="noreferrer">
+                                  View
+                                </Anchor>
+                              ) : (
+                                '—'
+                              )}
+                            </Table.Td>
+                          </Table.Tr>
+                        );
+                      })}
                     </Table.Tbody>
                   </Table>
                 </ScrollArea>
