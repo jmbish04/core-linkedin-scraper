@@ -408,8 +408,11 @@ Respond ONLY with valid JSON, no additional text.`;
       max_tokens: 500,
     });
 
-    const text = typeof response === 'object' && 'response' in response ? response.response : JSON.stringify(response);
-    const cleanText = String(text)
+    if (typeof response !== 'object' || !response || !('response' in response) || typeof response.response !== 'string') {
+      throw new Error('Unexpected AI response format: ' + JSON.stringify(response));
+    }
+    const text = response.response;
+    const cleanText = text
       .trim()
       .replace(/^```json\s*/, '')
       .replace(/^```\s*/, '')
