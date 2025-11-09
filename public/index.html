@@ -546,16 +546,7 @@
                     </Table.Thead>
                     <Table.Tbody>
                       {jobs.map((job) => {
-                        let skills = [];
-                        if (job.ai_skills_parsed) {
-                          skills = job.ai_skills_parsed;
-                        } else if (job.ai_skills) {
-                          try {
-                            skills = JSON.parse(job.ai_skills);
-                          } catch (e) {
-                            skills = [];
-                          }
-                        }
+                        const skills = job.ai_skills_parsed || [];
 
                         return (
                           <Table.Tr key={job.job_urn}>
